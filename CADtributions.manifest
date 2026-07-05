@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "author": "Sri",
+    "description": {
+        "": "Tracks a CADtribution every time you save a new version of a design (or create a new file) and displays them in a GitHub-style contribution graph."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
