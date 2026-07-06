@@ -61,6 +61,7 @@
     gap: 22px;
     margin-top: 10px;
     flex-wrap: wrap;
+    align-items: flex-end;
   }
 
   .stat {
@@ -79,6 +80,20 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+  }
+
+  .setting-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: auto;
+  }
+
+  .setting-toggle input {
+    cursor: pointer;
   }
 
   main {
@@ -219,19 +234,22 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--level3);
+    background: var(--accent);
   }
-
-  .entry .badge.new { background: var(--accent); }
 
   .entry .main {
     flex: 1;
     min-width: 0;
   }
 
-  .entry .file {
+  .entry .message {
+    color: var(--text);
     font-weight: 600;
-    color: #ffffff;
+    font-size: 12px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .entry .path {
@@ -240,6 +258,15 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .entry .path.has-link {
+    cursor: pointer;
+  }
+
+  .entry .path.has-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .entry .meta {
@@ -295,6 +322,10 @@
       <div class="stat"><span class="value" id="stat-streak">0</span><span class="label">Current streak</span></div>
       <div class="stat"><span class="value" id="stat-longest">0</span><span class="label">Longest streak</span></div>
       <div class="stat"><span class="value" id="stat-today">0</span><span class="label">Today</span></div>
+      <label class="setting-toggle">
+        <input type="checkbox" id="ask-description-toggle" />
+        Ask for a description on save
+      </label>
     </div>
   </header>
 
@@ -345,6 +376,7 @@
   var selectedProject = '';
   var visibleCount = 10;
   var PAGE_SIZE = 10;
+  var askForDescriptionEnabled = true;
 
   function toDate(s) {
     var parts = s.split('-');
@@ -359,8 +391,16 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  function render(entries) {
-    allEntries = entries || [];
+  function render(payload) {
+    var entries = (payload && payload.entries) || [];
+    var settings = (payload && payload.settings) || {};
+
+    allEntries = entries;
+    askForDescriptionEnabled = settings.askForDescription !== false;
+
+    var toggle = document.getElementById('ask-description-toggle');
+    toggle.checked = askForDescriptionEnabled;
+
     renderStats();
     renderProjectFilter();
     renderGraph();
@@ -602,22 +642,29 @@
     toShow.forEach(function(e) {
       var row = document.createElement('div');
       row.className = 'entry';
-
       var badge = document.createElement('div');
-      badge.className = 'badge' + (e.isNewFile ? ' new' : '');
+      badge.className = 'badge';
       row.appendChild(badge);
 
       var main = document.createElement('div');
       main.className = 'main';
 
-      var fileLine = document.createElement('div');
-      fileLine.className = 'file';
-      fileLine.textContent = e.file;
+      if (e.description) {
+        var messageLine = document.createElement('div');
+        messageLine.className = 'message';
+        messageLine.textContent = e.description;
+        main.appendChild(messageLine);
+      }
 
       var pathLine = document.createElement('div');
       pathLine.className = 'path';
       pathLine.textContent = e.path || e.project;
-      main.appendChild(fileLine);
+      if (e.fileId) {
+        pathLine.classList.add('has-link');
+        pathLine.addEventListener('click', function() {
+          adsk.fusionSendData('openFile', JSON.stringify({ fileId: e.fileId }));
+        });
+      }
       main.appendChild(pathLine);
       row.appendChild(main);
 
@@ -653,6 +700,11 @@
     renderEntries();
   });
 
+  document.getElementById('ask-description-toggle').addEventListener('change', function(e) {
+    askForDescriptionEnabled = e.target.checked;
+    adsk.fusionSendData('setSetting', JSON.stringify({ askForDescription: askForDescriptionEnabled }));
+  });
+
   // Receives pushes from Fusion (e.g. a live update right after a save).
   window.fusionJavaScriptHandler = {
     handle: function(action, data) {
@@ -676,7 +728,7 @@
         render(JSON.parse(response));
       }
     } catch (err) {
-      render([]);
+      render({ entries: [], settings: {} });
     }
   })();
 </script>
