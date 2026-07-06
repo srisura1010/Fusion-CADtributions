@@ -16,6 +16,7 @@ import os
 import json
 import datetime
 import pathlib
+import threading
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -33,15 +34,15 @@ ADDIN_NAME = 'CADtributions'
 CMD_ID_SHOW_GRAPH = 'CADtributions_ShowGraph'
 PALETTE_ID = 'CADtributions_Palette'
 PALETTE_NAME = 'CADtributions'
+DESCRIPTION_READY_EVENT_ID = 'CADtributions_DescriptionReady'
+
+# How long to wait, in the background, before re-checking a version's
+# description against the cloud. Not a hard guarantee, just a reasonable bet.
+DESCRIPTION_RECHECK_DELAY_SECONDS = 3.0
 
 ADDIN_FOLDER = os.path.dirname(os.path.realpath(__file__))
 DATA_FILE_PATH = os.path.join(ADDIN_FOLDER, 'cadtributions_data.json')
-SETTINGS_FILE_PATH = os.path.join(ADDIN_FOLDER, 'cadtributions_settings.json')
 HTML_FILE_PATH = os.path.join(ADDIN_FOLDER, 'palette.html')
-
-DEFAULT_SETTINGS = {
-    'askForDescription': True,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,9 @@ DEFAULT_SETTINGS = {
 #     "file":        the design's file name
 #     "version":     the version number Fusion assigned to this save
 #     "isNewFile":   True if this save created the file for the first time
-#     "description": the user's own note about what changed
+#     "description": the version description, pulled from Fusion's own save
+#                    dialog (may briefly show a placeholder right after a
+#                    save, until the background recheck confirms it)
 #     "fileId":      the Fusion Data Panel file id (URN), or null if this
 #                    document isn't stored in a Fusion project
 #   }
@@ -105,29 +108,22 @@ def add_entry(entry: dict) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# Settings persistence (small separate file, kept apart from the entry log)
-# ---------------------------------------------------------------------------
+def update_entry_description(entry_id: str, new_description: str) -> bool:
+    """Find an existing entry by id and correct its description in place.
 
-def load_settings() -> dict:
-    settings = dict(DEFAULT_SETTINGS)
-    if not os.path.exists(SETTINGS_FILE_PATH):
-        return settings
-    try:
-        with open(SETTINGS_FILE_PATH, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            if content:
-                settings.update(json.loads(content))
-    except (json.JSONDecodeError, OSError):
-        pass
-    return settings
-
-
-def save_settings(settings: dict) -> None:
-    tmp_path = SETTINGS_FILE_PATH + '.tmp'
-    with open(tmp_path, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, indent=2)
-    os.replace(tmp_path, SETTINGS_FILE_PATH)
+    Returns True if something was actually changed, so the caller can decide
+    whether the palette needs refreshing.
+    """
+    entries = load_data()
+    changed = False
+    for e in entries:
+        if e.get('id') == entry_id and e.get('description') != new_description:
+            e['description'] = new_description
+            changed = True
+            break
+    if changed:
+        save_data(entries)
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +156,9 @@ def get_full_breadcrumb(data_file: adsk.core.DataFile) -> str:
 
 
 def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
-    """Turn a just-saved Document into a CADtribution record (minus the
-    description, which is added separately since it needs a user prompt)."""
+    """Turn a just-saved Document into a CADtribution record. The
+    description here is always the safe placeholder -- the real one (if
+    different) arrives a few seconds later via the background recheck."""
     now = datetime.datetime.now()
     timestamp = now.isoformat(timespec='seconds')
     date_str = now.strftime('%Y-%m-%d')
@@ -193,6 +190,7 @@ def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
             'version': version,
             'isNewFile': version == 1,
             'fileId': data_file.id,
+            'description': f'Cadtributed in {data_file.name}',
         }
     else:
         # Fallback for documents that aren't saved into a Fusion project
@@ -213,32 +211,32 @@ def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
             'version': version,
             'isNewFile': version == 1,
             'fileId': None,
+            'description': f'Cadtributed in {file_name}',
         }
 
     return entry
 
 
-def prompt_for_description(entry: dict) -> str:
-    """Ask the user what they changed, honoring the askForDescription
-    setting. Always returns a usable string -- falls back to a default
-    template if the setting is off, the prompt is cancelled, or left blank."""
-    default_message = f'Cadtributed in {entry["file"]}'
+def schedule_description_recheck(entry_id: str, file_id: str):
+    """Runs on a background thread. Fires the CustomEvent a few times at
+    increasing delays, since we don't know exactly how long Fusion's cloud
+    sync takes -- each firing re-reads the description fresh and overwrites
+    the entry, so a later, more-likely-correct check wins over an earlier,
+    possibly-stale one."""
+    def _poll_and_fire():
+        import time
+        # Gaps *between* checks, not total elapsed time -- this checks at
+        # roughly +2s, +5s, and +10s after the save.
+        gaps_between_checks = [2.0, 3.0, 5.0]
+        for gap in gaps_between_checks:
+            time.sleep(gap)
+            try:
+                payload = json.dumps({'entryId': entry_id, 'fileId': file_id})
+                _app.fireCustomEvent(DESCRIPTION_READY_EVENT_ID, payload)
+            except Exception:
+                pass
 
-    settings = load_settings()
-    if not settings.get('askForDescription', True):
-        return default_message
-
-    try:
-        user_text, was_cancelled = _ui.inputBox(
-            'What did you change?', 'CADtributions', default_message
-        )
-    except Exception:
-        return default_message
-
-    if was_cancelled or not user_text.strip():
-        return default_message
-
-    return user_text.strip()
+    threading.Thread(target=_poll_and_fire, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -277,11 +275,7 @@ def show_palette():
 
 
 def _current_payload() -> str:
-    """Bundle entries + settings together, since the palette needs both."""
-    return json.dumps({
-        'entries': load_data(),
-        'settings': load_settings(),
-    })
+    return json.dumps(load_data())
 
 
 def send_data_to_palette():
@@ -304,27 +298,12 @@ class DocumentSavedHandler(adsk.core.DocumentEventHandler):
             doc = args.document
             entry = build_entry_for_saved_document(doc)
 
-            data_file = None
-            try:
-                data_file = doc.dataFile
-            except Exception:
-                data_file = None
-
-            native_description = None
-            if data_file is not None:
-                try:
-                    native_description = data_file.description
-                except AttributeError:
-                    native_description = None
-
-            if native_description:
-                entry['description'] = native_description.strip()
-            else:
-                entry['description'] = prompt_for_description(entry)
-
             added = add_entry(entry)
             if added:
                 send_data_to_palette()
+
+            if entry.get('fileId'):
+                schedule_description_recheck(entry['id'], entry['fileId'])
         except Exception:
             # Never let a failure here interrupt the user's save.
             if _ui:
@@ -333,6 +312,41 @@ class DocumentSavedHandler(adsk.core.DocumentEventHandler):
                         traceback.format_exc()
                     )
                 )
+
+
+class DescriptionReadyHandler(adsk.core.CustomEventHandler):
+    """Fires back on Fusion's main thread once the background recheck
+    thread's delay has elapsed. Safe to touch Fusion API objects here."""
+
+    def notify(self, args: adsk.core.CustomEventArgs):
+        try:
+            payload = json.loads(args.additionalInfo)
+            entry_id = payload.get('entryId')
+            file_id = payload.get('fileId')
+            if not entry_id or not file_id:
+                return
+
+            data_file = _app.data.findFileById(file_id)
+            if data_file is None:
+                return
+
+            try:
+                data_file.refresh()
+            except Exception:
+                pass
+
+            try:
+                real_description = data_file.description
+            except AttributeError:
+                real_description = None
+
+            if real_description:
+                changed = update_entry_description(entry_id, real_description.strip())
+                if changed:
+                    send_data_to_palette()
+        except Exception:
+            if _ui:
+                _ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
 
 
 class ShowGraphCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
@@ -356,13 +370,6 @@ class CADtributionsHTMLHandler(adsk.core.HTMLEventHandler):
 
             if action in ('ready', 'refresh'):
                 html_args.returnData = _current_payload()
-
-            elif action == 'setSetting':
-                incoming = json.loads(html_args.data) if html_args.data else {}
-                settings = load_settings()
-                settings.update(incoming)
-                save_settings(settings)
-                html_args.returnData = json.dumps({'status': 'OK'})
 
             elif action == 'openFile':
                 incoming = json.loads(html_args.data) if html_args.data else {}
@@ -421,6 +428,17 @@ def _initialize():
     _app.documentSaved.add(on_saved)
     _handlers.append(on_saved)
 
+    # Remove any leftover registration from a previous run before adding
+    # our own, so restarting the add-in doesn't error out.
+    try:
+        _app.unregisterCustomEvent(DESCRIPTION_READY_EVENT_ID)
+    except Exception:
+        pass
+    custom_event = _app.registerCustomEvent(DESCRIPTION_READY_EVENT_ID)
+    on_description_ready = DescriptionReadyHandler()
+    custom_event.add(on_description_ready)
+    _handlers.append(on_description_ready)
+
 
 def _cleanup():
     try:
@@ -443,6 +461,11 @@ def _cleanup():
         palette = get_palette()
         if palette:
             palette.deleteMe()
+    except Exception:
+        pass
+
+    try:
+        _app.unregisterCustomEvent(DESCRIPTION_READY_EVENT_ID)
     except Exception:
         pass
 
