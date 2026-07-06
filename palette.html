@@ -82,20 +82,6 @@
     letter-spacing: 0.03em;
   }
 
-  .setting-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    font-size: 12px;
-    cursor: pointer;
-    margin-left: auto;
-  }
-
-  .setting-toggle input {
-    cursor: pointer;
-  }
-
   main {
     flex: 1;
     overflow: auto;
@@ -322,10 +308,6 @@
       <div class="stat"><span class="value" id="stat-streak">0</span><span class="label">Current streak</span></div>
       <div class="stat"><span class="value" id="stat-longest">0</span><span class="label">Longest streak</span></div>
       <div class="stat"><span class="value" id="stat-today">0</span><span class="label">Today</span></div>
-      <label class="setting-toggle">
-        <input type="checkbox" id="ask-description-toggle" />
-        Ask for a description on save
-      </label>
     </div>
   </header>
 
@@ -376,7 +358,6 @@
   var selectedProject = '';
   var visibleCount = 10;
   var PAGE_SIZE = 10;
-  var askForDescriptionEnabled = true;
 
   function toDate(s) {
     var parts = s.split('-');
@@ -391,16 +372,8 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  function render(payload) {
-    var entries = (payload && payload.entries) || [];
-    var settings = (payload && payload.settings) || {};
-
-    allEntries = entries;
-    askForDescriptionEnabled = settings.askForDescription !== false;
-
-    var toggle = document.getElementById('ask-description-toggle');
-    toggle.checked = askForDescriptionEnabled;
-
+  function render(entries) {
+    allEntries = entries || [];
     renderStats();
     renderProjectFilter();
     renderGraph();
@@ -700,11 +673,6 @@
     renderEntries();
   });
 
-  document.getElementById('ask-description-toggle').addEventListener('change', function(e) {
-    askForDescriptionEnabled = e.target.checked;
-    adsk.fusionSendData('setSetting', JSON.stringify({ askForDescription: askForDescriptionEnabled }));
-  });
-
   // Receives pushes from Fusion (e.g. a live update right after a save).
   window.fusionJavaScriptHandler = {
     handle: function(action, data) {
@@ -728,7 +696,7 @@
         render(JSON.parse(response));
       }
     } catch (err) {
-      render({ entries: [], settings: {} });
+      render([]);
     }
   })();
 </script>
