@@ -250,14 +250,24 @@
     text-align: right;
   }
 
-  .entry .tag {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgba(88,166,255,0.15);
+  #show-more-wrap {
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  .show-more-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .show-more-btn:hover {
+    border-color: var(--accent);
     color: var(--accent);
-    font-size: 10px;
-    margin-left: 6px;
   }
 
   #empty-state {
@@ -318,6 +328,7 @@
         </select>
       </div>
       <div id="entries"></div>
+      <div id="show-more-wrap"></div>
       <div id="empty-state" style="display:none;">
         <strong>No CADtributions yet</strong>
         Save a design in Fusion 360 to make your first CADtribution.
@@ -332,6 +343,8 @@
   var allEntries = [];
   var selectedDate = null;
   var selectedProject = '';
+  var visibleCount = 10;
+  var PAGE_SIZE = 10;
 
   function toDate(s) {
     var parts = s.split('-');
@@ -505,6 +518,7 @@
         cell.addEventListener('click', function() {
           var clickedDate = this.getAttribute('data-date');
           selectedDate = (selectedDate === clickedDate) ? null : clickedDate;
+          visibleCount = PAGE_SIZE;
           renderGraph();
           renderEntries();
         });
@@ -550,7 +564,9 @@
     var container = document.getElementById('entries');
     var emptyState = document.getElementById('empty-state');
     var titleEl = document.getElementById('entries-title');
+    var showMoreWrap = document.getElementById('show-more-wrap');
     container.innerHTML = '';
+    showMoreWrap.innerHTML = '';
 
     var filtered = allEntries.filter(function(e) {
       if (selectedProject && e.project !== selectedProject) return false;
@@ -581,7 +597,7 @@
     container.style.display = 'block';
     emptyState.style.display = 'none';
 
-    var toShow = selectedDate ? filtered : filtered.slice(0, 40);
+    var toShow = filtered.slice(0, visibleCount);
 
     toShow.forEach(function(e) {
       var row = document.createElement('div');
@@ -593,15 +609,11 @@
 
       var main = document.createElement('div');
       main.className = 'main';
+
       var fileLine = document.createElement('div');
       fileLine.className = 'file';
       fileLine.textContent = e.file;
-      if (e.isNewFile) {
-        var tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.textContent = 'new file';
-        fileLine.appendChild(tag);
-      }
+
       var pathLine = document.createElement('div');
       pathLine.className = 'path';
       pathLine.textContent = e.path || e.project;
@@ -611,16 +623,31 @@
 
       var meta = document.createElement('div');
       meta.className = 'meta';
+
       var when = new Date(e.timestamp);
       meta.innerHTML = 'v' + e.version + '<br>' + when.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
       row.appendChild(meta);
 
       container.appendChild(row);
     });
+
+    var remaining = filtered.length - toShow.length;
+    
+    if (remaining > 0) {
+      var btn = document.createElement('button');
+      btn.className = 'show-more-btn';
+      btn.textContent = 'Show ' + Math.min(PAGE_SIZE, remaining) + ' more';
+      btn.addEventListener('click', function() {
+        visibleCount += PAGE_SIZE;
+        renderEntries();
+      });
+      showMoreWrap.appendChild(btn);
+    }
   }
 
   document.getElementById('project-filter').addEventListener('change', function(e) {
     selectedProject = e.target.value;
+    visibleCount = PAGE_SIZE;
     renderStats();
     renderGraph();
     renderEntries();
