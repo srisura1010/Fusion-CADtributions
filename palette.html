@@ -284,7 +284,6 @@
       <div class="stat"><span class="value" id="stat-total">0</span><span class="label">Total CADtributions</span></div>
       <div class="stat"><span class="value" id="stat-streak">0</span><span class="label">Current streak</span></div>
       <div class="stat"><span class="value" id="stat-longest">0</span><span class="label">Longest streak</span></div>
-      <div class="stat"><span class="value" id="stat-files">0</span><span class="label">Files touched</span></div>
       <div class="stat"><span class="value" id="stat-today">0</span><span class="label">Today</span></div>
     </div>
   </header>
@@ -367,10 +366,6 @@
   function renderStats() {
     var relevant = selectedProject ? allEntries.filter(function(e){ return e.project === selectedProject; }) : allEntries;
     document.getElementById('stat-total').textContent = relevant.length;
-
-    var files = {};
-    relevant.forEach(function(e){ files[e.project + '|' + e.path] = true; });
-    document.getElementById('stat-files').textContent = Object.keys(files).length;
 
     var counts = countsByDate();
     var todayKey = fmtDateKey(new Date());
