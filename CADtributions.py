@@ -36,7 +36,12 @@ PALETTE_NAME = 'CADtributions'
 
 ADDIN_FOLDER = os.path.dirname(os.path.realpath(__file__))
 DATA_FILE_PATH = os.path.join(ADDIN_FOLDER, 'cadtributions_data.json')
+SETTINGS_FILE_PATH = os.path.join(ADDIN_FOLDER, 'cadtributions_settings.json')
 HTML_FILE_PATH = os.path.join(ADDIN_FOLDER, 'palette.html')
+
+DEFAULT_SETTINGS = {
+    'askForDescription': True,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -44,15 +49,18 @@ HTML_FILE_PATH = os.path.join(ADDIN_FOLDER, 'palette.html')
 # ---------------------------------------------------------------------------
 # Every "CADtribution" is stored as one JSON record:
 #   {
-#     "id":         unique id used to de-duplicate (fileId:version, or a
-#                   local equivalent for files not saved to a Fusion project)
-#     "timestamp":  full ISO-8601 timestamp of the save
-#     "date":       YYYY-MM-DD (local date), used to bucket the graph
-#     "project":    the Fusion "Data Panel" project name
-#     "path":       breadcrumb path, e.g. "MyProject / Robots / Chassis"
-#     "file":       the design's file name
-#     "version":    the version number Fusion assigned to this save
-#     "isNewFile":  True if this save created the file for the first time
+#     "id":          unique id used to de-duplicate (fileId:version, or a
+#                    local equivalent for files not saved to a Fusion project)
+#     "timestamp":   full ISO-8601 timestamp of the save
+#     "date":        YYYY-MM-DD (local date), used to bucket the graph
+#     "project":     the Fusion "Data Panel" project name
+#     "path":        breadcrumb path, e.g. "MyProject / Robots / Chassis"
+#     "file":        the design's file name
+#     "version":     the version number Fusion assigned to this save
+#     "isNewFile":   True if this save created the file for the first time
+#     "description": the user's own note about what changed
+#     "fileId":      the Fusion Data Panel file id (URN), or null if this
+#                    document isn't stored in a Fusion project
 #   }
 
 def load_data() -> list:
@@ -98,6 +106,31 @@ def add_entry(entry: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Settings persistence (small separate file, kept apart from the entry log)
+# ---------------------------------------------------------------------------
+
+def load_settings() -> dict:
+    settings = dict(DEFAULT_SETTINGS)
+    if not os.path.exists(SETTINGS_FILE_PATH):
+        return settings
+    try:
+        with open(SETTINGS_FILE_PATH, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if content:
+                settings.update(json.loads(content))
+    except (json.JSONDecodeError, OSError):
+        pass
+    return settings
+
+
+def save_settings(settings: dict) -> None:
+    tmp_path = SETTINGS_FILE_PATH + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2)
+    os.replace(tmp_path, SETTINGS_FILE_PATH)
+
+
+# ---------------------------------------------------------------------------
 # Helpers for reading information out of the Fusion document / data file
 # ---------------------------------------------------------------------------
 
@@ -127,7 +160,8 @@ def get_full_breadcrumb(data_file: adsk.core.DataFile) -> str:
 
 
 def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
-    """Turn a just-saved Document into a CADtribution record."""
+    """Turn a just-saved Document into a CADtribution record (minus the
+    description, which is added separately since it needs a user prompt)."""
     now = datetime.datetime.now()
     timestamp = now.isoformat(timespec='seconds')
     date_str = now.strftime('%Y-%m-%d')
@@ -158,6 +192,7 @@ def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
             'file': data_file.name,
             'version': version,
             'isNewFile': version == 1,
+            'fileId': data_file.id,
         }
     else:
         # Fallback for documents that aren't saved into a Fusion project
@@ -177,9 +212,33 @@ def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
             'file': file_name,
             'version': version,
             'isNewFile': version == 1,
+            'fileId': None,
         }
 
     return entry
+
+
+def prompt_for_description(entry: dict) -> str:
+    """Ask the user what they changed, honoring the askForDescription
+    setting. Always returns a usable string -- falls back to a default
+    template if the setting is off, the prompt is cancelled, or left blank."""
+    default_message = f'Cadtributed in {entry["file"]}'
+
+    settings = load_settings()
+    if not settings.get('askForDescription', True):
+        return default_message
+
+    try:
+        user_text, was_cancelled = _ui.inputBox(
+            'What did you change?', 'CADtributions', default_message
+        )
+    except Exception:
+        return default_message
+
+    if was_cancelled or not user_text.strip():
+        return default_message
+
+    return user_text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +276,19 @@ def show_palette():
     send_data_to_palette()
 
 
+def _current_payload() -> str:
+    """Bundle entries + settings together, since the palette needs both."""
+    return json.dumps({
+        'entries': load_data(),
+        'settings': load_settings(),
+    })
+
+
 def send_data_to_palette():
     """Push the latest CADtribution history into the open palette, if any."""
     palette = get_palette()
     if palette is not None and palette.isVisible:
-        data = load_data()
-        palette.sendInfoToHTML('populate', json.dumps(data))
+        palette.sendInfoToHTML('populate', _current_payload())
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +303,25 @@ class DocumentSavedHandler(adsk.core.DocumentEventHandler):
         try:
             doc = args.document
             entry = build_entry_for_saved_document(doc)
+
+            data_file = None
+            try:
+                data_file = doc.dataFile
+            except Exception:
+                data_file = None
+
+            native_description = None
+            if data_file is not None:
+                try:
+                    native_description = data_file.description
+                except AttributeError:
+                    native_description = None
+
+            if native_description:
+                entry['description'] = native_description.strip()
+            else:
+                entry['description'] = prompt_for_description(entry)
+
             added = add_entry(entry)
             if added:
                 send_data_to_palette()
@@ -270,8 +355,31 @@ class CADtributionsHTMLHandler(adsk.core.HTMLEventHandler):
             action = html_args.action
 
             if action in ('ready', 'refresh'):
-                data = load_data()
-                html_args.returnData = json.dumps(data)
+                html_args.returnData = _current_payload()
+
+            elif action == 'setSetting':
+                incoming = json.loads(html_args.data) if html_args.data else {}
+                settings = load_settings()
+                settings.update(incoming)
+                save_settings(settings)
+                html_args.returnData = json.dumps({'status': 'OK'})
+
+            elif action == 'openFile':
+                incoming = json.loads(html_args.data) if html_args.data else {}
+                file_id = incoming.get('fileId')
+                if not file_id:
+                    html_args.returnData = json.dumps({'status': 'no_id'})
+                else:
+                    try:
+                        data_file = _app.data.findFileById(file_id)
+                        if data_file is None:
+                            html_args.returnData = json.dumps({'status': 'not_found'})
+                        else:
+                            _app.documents.open(data_file, True)
+                            html_args.returnData = json.dumps({'status': 'OK'})
+                    except Exception:
+                        html_args.returnData = json.dumps({'status': 'error'})
+
             else:
                 html_args.returnData = json.dumps({'status': 'ignored'})
         except Exception:
