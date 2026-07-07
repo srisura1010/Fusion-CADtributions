@@ -3,7 +3,7 @@ CADtributions
 -------------
 A Fusion 360 add-in that tracks every time you save a new version of a
 design (or create a brand new file) and shows them in a GitHub-style
-"contribution graph" -> a CADtribution graph.
+"contribution graph" -- a CADtribution graph.
 
 Author: Srivatsav Sura
 """
@@ -30,15 +30,21 @@ _ui: adsk.core.UserInterface = None
 # events silently stop firing.
 _handlers = []
 
+# Keeps a live reference to a just-saved Document while we wait for Fusion's
+# cloud record (id, description) to finish settling. Keyed by entry id.
+# Cleared once the last scheduled recheck for that entry has run.
+_pending_docs = {}
+
 ADDIN_NAME = 'CADtributions'
 CMD_ID_SHOW_GRAPH = 'CADtributions_ShowGraph'
 PALETTE_ID = 'CADtributions_Palette'
 PALETTE_NAME = 'CADtributions'
 DESCRIPTION_READY_EVENT_ID = 'CADtributions_DescriptionReady'
 
-# How long to wait, in the background, before re-checking a version's
-# description against the cloud. Not a hard guarantee, just a reasonable bet.
-DESCRIPTION_RECHECK_DELAY_SECONDS = 3.0
+# Gaps *between* background rechecks (not total elapsed time) -- checks
+# land at roughly +2s, +5s, and +10s after the save. Not a hard guarantee
+# on Fusion's cloud sync timing, just a reasonable bet.
+RECHECK_GAPS_SECONDS = [2.0, 3.0, 5.0]
 
 ADDIN_FOLDER = os.path.dirname(os.path.realpath(__file__))
 DATA_FILE_PATH = os.path.join(ADDIN_FOLDER, 'cadtributions_data.json')
@@ -63,7 +69,9 @@ HTML_FILE_PATH = os.path.join(ADDIN_FOLDER, 'palette.html')
 #                    dialog (may briefly show a placeholder right after a
 #                    save, until the background recheck confirms it)
 #     "fileId":      the Fusion Data Panel file id (URN), or null if this
-#                    document isn't stored in a Fusion project
+#                    document isn't stored in a Fusion project. May be
+#                    corrected shortly after a brand-new file's first save,
+#                    once Fusion finishes assigning its permanent id.
 #   }
 
 def load_data() -> list:
@@ -108,19 +116,19 @@ def add_entry(entry: dict) -> bool:
     return True
 
 
-def update_entry_description(entry_id: str, new_description: str) -> bool:
-    """Find an existing entry by id and correct its description in place.
-
-    Returns True if something was actually changed, so the caller can decide
-    whether the palette needs refreshing.
-    """
+def correct_entry_fields(entry_id: str, updates: dict) -> bool:
+    """Apply corrected values (fileId and/or description) to an existing
+    entry, in place. Returns True if anything actually changed."""
     entries = load_data()
     changed = False
     for e in entries:
-        if e.get('id') == entry_id and e.get('description') != new_description:
-            e['description'] = new_description
-            changed = True
-            break
+        if e.get('id') != entry_id:
+            continue
+        for key, value in updates.items():
+            if value and e.get(key) != value:
+                e[key] = value
+                changed = True
+        break
     if changed:
         save_data(entries)
     return changed
@@ -217,21 +225,21 @@ def build_entry_for_saved_document(doc: adsk.core.Document) -> dict:
     return entry
 
 
-def schedule_description_recheck(entry_id: str, file_id: str):
-    """Runs on a background thread. Fires the CustomEvent a few times at
-    increasing delays, since we don't know exactly how long Fusion's cloud
-    sync takes -- each firing re-reads the description fresh and overwrites
-    the entry, so a later, more-likely-correct check wins over an earlier,
-    possibly-stale one."""
+def schedule_description_recheck(entry_id: str, doc: adsk.core.Document):
+    """Runs on a background thread purely to wait -- the actual Fusion API
+    calls all happen back on the main thread, via the CustomEvent handler.
+    Fires that event a few times at increasing delays, since a brand-new
+    file can take noticeably longer to fully register in Fusion's cloud
+    database than a version bump on an existing file does."""
+    _pending_docs[entry_id] = doc
+
     def _poll_and_fire():
         import time
-        # Gaps *between* checks, not total elapsed time -- this checks at
-        # roughly +2s, +5s, and +10s after the save.
-        gaps_between_checks = [2.0, 3.0, 5.0]
-        for gap in gaps_between_checks:
+        for i, gap in enumerate(RECHECK_GAPS_SECONDS):
             time.sleep(gap)
+            is_last = (i == len(RECHECK_GAPS_SECONDS) - 1)
             try:
-                payload = json.dumps({'entryId': entry_id, 'fileId': file_id})
+                payload = json.dumps({'entryId': entry_id, 'isLast': is_last})
                 _app.fireCustomEvent(DESCRIPTION_READY_EVENT_ID, payload)
             except Exception:
                 pass
@@ -303,7 +311,7 @@ class DocumentSavedHandler(adsk.core.DocumentEventHandler):
                 send_data_to_palette()
 
             if entry.get('fileId'):
-                schedule_description_recheck(entry['id'], entry['fileId'])
+                schedule_description_recheck(entry['id'], doc)
         except Exception:
             # Never let a failure here interrupt the user's save.
             if _ui:
@@ -315,35 +323,55 @@ class DocumentSavedHandler(adsk.core.DocumentEventHandler):
 
 
 class DescriptionReadyHandler(adsk.core.CustomEventHandler):
-    """Fires back on Fusion's main thread once the background recheck
-    thread's delay has elapsed. Safe to touch Fusion API objects here."""
+    """Fires back on Fusion's main thread once a background recheck
+    thread's delay has elapsed. Re-reads the file straight off the live
+    Document object we kept a reference to -- not via a cloud id lookup,
+    since that id may itself still be settling for a brand-new file."""
 
     def notify(self, args: adsk.core.CustomEventArgs):
         try:
             payload = json.loads(args.additionalInfo)
             entry_id = payload.get('entryId')
-            file_id = payload.get('fileId')
-            if not entry_id or not file_id:
+            is_last = payload.get('isLast', False)
+            if not entry_id:
                 return
 
-            data_file = _app.data.findFileById(file_id)
-            if data_file is None:
-                return
+            doc = _pending_docs.get(entry_id)
+            if doc is not None:
+                try:
+                    data_file = doc.dataFile
+                except Exception:
+                    data_file = None
 
-            try:
-                data_file.refresh()
-            except Exception:
-                pass
+                if data_file is not None:
+                    try:
+                        data_file.refresh()
+                    except Exception:
+                        pass
 
-            try:
-                real_description = data_file.description
-            except AttributeError:
-                real_description = None
+                    real_id = None
+                    try:
+                        real_id = data_file.id
+                    except Exception:
+                        real_id = None
 
-            if real_description:
-                changed = update_entry_description(entry_id, real_description.strip())
-                if changed:
-                    send_data_to_palette()
+                    real_description = None
+                    try:
+                        real_description = data_file.description
+                    except AttributeError:
+                        real_description = None
+
+                    updates = {}
+                    if real_id:
+                        updates['fileId'] = real_id
+                    if real_description:
+                        updates['description'] = real_description.strip()
+
+                    if updates and correct_entry_fields(entry_id, updates):
+                        send_data_to_palette()
+
+            if is_last:
+                _pending_docs.pop(entry_id, None)
         except Exception:
             if _ui:
                 _ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
@@ -395,7 +423,11 @@ class CADtributionsHTMLHandler(adsk.core.HTMLEventHandler):
                             html_args.returnData = json.dumps({'status': 'OK'})
                     except Exception:
                         if _ui:
-                            _ui.messageBox("This file couldn't be opened.")
+                            _ui.messageBox(
+                                "This file couldn't be opened yet -- Fusion may still "
+                                "be finishing setup for a brand-new file. Try again "
+                                "in a few seconds."
+                            )
                         html_args.returnData = json.dumps({'status': 'error'})
 
             else:
@@ -479,6 +511,7 @@ def _cleanup():
     except Exception:
         pass
 
+    _pending_docs.clear()
     _handlers.clear()
 
 
