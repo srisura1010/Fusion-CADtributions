@@ -420,8 +420,7 @@ def _initialize():
         cmd_def = _ui.commandDefinitions.addButtonDefinition(
             CMD_ID_SHOW_GRAPH,
             'CADtributions',
-            'Show your CADtribution graph -- a GitHub-style view of your\n'
-            'Fusion 360 save history: what you saved, where, and when.',
+            'View your CADtributions graph with a GitHub-style view of your Fusion 360 save history: what you saved, where, and when.',
             './resources/graph_cmd',
         )
 
