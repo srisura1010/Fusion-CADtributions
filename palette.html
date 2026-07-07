@@ -91,6 +91,18 @@
     gap: 18px;
   }
 
+  #graph-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  #graph-header .graph-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
   #graph-wrap {
     overflow-x: auto;
     padding-bottom: 4px;
@@ -196,6 +208,11 @@
     border-radius: 6px;
     padding: 4px 8px;
     font-size: 12px;
+  }
+
+  .filter-group {
+    display: flex;
+    gap: 8px;
   }
 
   #entries {
@@ -313,6 +330,12 @@
 
   <main>
     <div>
+      <div id="graph-header">
+        <span class="graph-title" id="graph-title">Last year</span>
+        <select id="year-filter">
+          <option value="last-year">Last year</option>
+        </select>
+      </div>
       <div id="graph-wrap">
         <div id="month-labels"></div>
         <div id="graph">
@@ -356,6 +379,7 @@
   var allEntries = [];
   var selectedDate = null;
   var selectedProject = '';
+  var selectedYear = 'last-year';
   var visibleCount = 10;
   var PAGE_SIZE = 10;
 
@@ -372,12 +396,57 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  function ordinalSuffix(n) {
+    var j = n % 10, k = n % 100;
+    if (j === 1 && k !== 11) return n + 'st';
+    if (j === 2 && k !== 12) return n + 'nd';
+    if (j === 3 && k !== 13) return n + 'rd';
+    return n + 'th';
+  }
+
+  function fmtDateShort(d) {
+    var month = d.toLocaleDateString(undefined, { month: 'long' });
+    return month + ' ' + ordinalSuffix(d.getDate());
+  }
+
   function render(entries) {
     allEntries = entries || [];
     renderStats();
     renderProjectFilter();
+    renderYearFilter();
     renderGraph();
     renderEntries();
+  }
+
+  // Works out the date range to actually display: either the rolling
+  // 365-day window ending today (default), or a fixed Jan-Dec calendar
+  // year if the person picked one from the dropdown.
+  //
+  // gridStart is padded back to the preceding Sunday purely so the grid
+  // columns line up -- it is NOT real data and must never be treated as
+  // part of the year. dataStart/dataEnd are the true Jan 1 / Dec 31
+  // boundaries (or Jan 1 / today for the current year) used for
+  // everything else: counts, quartiles, totals, and hiding cells.
+  function getViewRange() {
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (selectedYear === 'last-year') {
+      var dataEnd = today;
+      var gridStart = new Date(today);
+      gridStart.setDate(gridStart.getDate() - 52 * 7);
+      gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+      return { gridStart: gridStart, dataStart: gridStart, dataEnd: dataEnd };
+    }
+
+    var y = parseInt(selectedYear, 10);
+    var dataStart = new Date(y, 0, 1);
+    var dataEnd = new Date(y, 11, 31);
+
+    var gridStart = new Date(dataStart);
+    gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+
+    return { gridStart: gridStart, dataStart: dataStart, dataEnd: dataEnd };
   }
 
   function countsByDate() {
@@ -389,15 +458,40 @@
     return counts;
   }
 
-  function renderStats() {
-    var relevant = selectedProject ? allEntries.filter(function(e){ return e.project === selectedProject; }) : allEntries;
-    document.getElementById('stat-total').textContent = relevant.length;
+  function countsInRange(rangeStart, rangeEnd) {
+    var counts = {};
+    allEntries.forEach(function(e) {
+      if (selectedProject && e.project !== selectedProject) return;
+      var d = toDate(e.date);
+      if (d < rangeStart || d > rangeEnd) return;
+      counts[e.date] = (counts[e.date] || 0) + 1;
+    });
+    return counts;
+  }
 
+  function computeTotalForView(rangeStart, rangeEnd) {
+    var total = 0;
+    allEntries.forEach(function(e) {
+      if (selectedProject && e.project !== selectedProject) return;
+      var d = toDate(e.date);
+      if (d < rangeStart || d > rangeEnd) return;
+      total += 1;
+    });
+    return total;
+  }
+
+  function renderStats() {
+    var range = getViewRange();
+    document.getElementById('stat-total').textContent =
+      computeTotalForView(range.dataStart, range.dataEnd);
+
+    // Streaks stay based on your whole history, regardless of which
+    // year you're browsing -- it's a personal all-time stat, not a
+    // per-view one.
     var counts = countsByDate();
     var todayKey = fmtDateKey(new Date());
     document.getElementById('stat-today').textContent = counts[todayKey] || 0;
 
-    // Streaks: consecutive days (including today or yesterday) with >=1 CADtribution
     var dayKeys = Object.keys(counts);
     var current = 0;
     var cursor = new Date();
@@ -445,6 +539,28 @@
     select.value = current;
   }
 
+  function renderYearFilter() {
+    var select = document.getElementById('year-filter');
+    var years = {};
+    allEntries.forEach(function(e){ years[e.date.substring(0, 4)] = true; });
+    years[String(new Date().getFullYear())] = true;
+
+    var yearList = Object.keys(years).sort(function(a, b) { return b - a; });
+    var current = select.value || 'last-year';
+
+    select.innerHTML = '<option value="last-year">Last year</option>';
+    yearList.forEach(function(y) {
+      var opt = document.createElement('option');
+      opt.value = y;
+      opt.textContent = y;
+      select.appendChild(opt);
+    });
+    select.value = current;
+
+    document.getElementById('graph-title').textContent =
+      (current === 'last-year') ? 'Last year' : current;
+  }
+
   function percentile(sortedValues, p) {
     if (sortedValues.length === 0) return 0;
     if (sortedValues.length === 1) return sortedValues[0];
@@ -466,14 +582,11 @@
     }
     values.sort(function(a, b) { return a - b; });
 
-    // First pass: quartiles on everything, just to detect outliers.
     var rawQ1 = percentile(values, 0.25);
     var rawQ3 = percentile(values, 0.75);
     var iqr = rawQ3 - rawQ1;
     var outlierThreshold = rawQ3 + 1.5 * iqr;
 
-    // Second pass: recompute quartiles with outliers excluded, so one
-    // huge day doesn't compress the rest of the scale.
     var filtered = values.filter(function(v) { return v <= outlierThreshold; });
     if (filtered.length === 0) filtered = values;
 
@@ -502,19 +615,15 @@
     weeksEl.style.gap = '3px';
     monthLabelsEl.innerHTML = '';
 
-    var counts = countsByDate();
-
+    var range = getViewRange();
+    var counts = countsInRange(range.dataStart, range.dataEnd);
     var quartiles = computeQuartiles(counts);
 
-    var today = new Date();
-    today.setHours(0,0,0,0);
+    var start = range.gridStart;
+    var dataStart = range.dataStart;
+    var dataEnd = range.dataEnd;
 
-    // Start on the Sunday at or before 52 weeks ago.
-    var start = new Date(today);
-    start.setDate(start.getDate() - 52 * 7);
-    start.setDate(start.getDate() - start.getDay());
-
-    var totalDays = Math.round((today - start) / 86400000) + 1;
+    var totalDays = Math.round((dataEnd - start) / 86400000) + 1;
     var totalWeeks = Math.ceil((totalDays + start.getDay()) / 7);
 
     var lastMonth = -1;
@@ -528,7 +637,7 @@
         var cellDate = new Date(start);
         cellDate.setDate(start.getDate() + w * 7 + d);
 
-        if (cellDate > today) {
+        if (cellDate < dataStart || cellDate > dataEnd) {
           var empty = document.createElement('div');
           empty.className = 'day-cell empty';
           col.appendChild(empty);
@@ -577,7 +686,7 @@
     var tooltip = document.getElementById('tooltip');
     var d = toDate(date);
     var noun = count == 1 ? 'CADtribution' : 'CADtributions';
-    tooltip.textContent = count + ' ' + noun + ' on ' + fmtDateNice(d);
+    tooltip.textContent = count + ' ' + noun + ' on ' + fmtDateShort(d);
     tooltip.style.display = 'block';
     moveTooltip(e);
   }
@@ -686,6 +795,17 @@
 
   document.getElementById('project-filter').addEventListener('change', function(e) {
     selectedProject = e.target.value;
+    visibleCount = PAGE_SIZE;
+    renderStats();
+    renderGraph();
+    renderEntries();
+  });
+
+  document.getElementById('year-filter').addEventListener('change', function(e) {
+    selectedYear = e.target.value;
+    document.getElementById('graph-title').textContent =
+      (selectedYear === 'last-year') ? 'Last year' : selectedYear;
+    selectedDate = null;
     visibleCount = PAGE_SIZE;
     renderStats();
     renderGraph();
