@@ -213,6 +213,22 @@
   .filter-group {
     display: flex;
     gap: 8px;
+    align-items: center;
+  }
+
+  .export-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .export-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   #entries {
@@ -332,9 +348,12 @@
     <div>
       <div id="graph-header">
         <span class="graph-title" id="graph-title">Last year</span>
-        <select id="year-filter">
-          <option value="last-year">Last year</option>
-        </select>
+        <div class="filter-group">
+          <select id="year-filter">
+            <option value="last-year">Last year</option>
+          </select>
+          <button class="export-btn" id="export-graph-btn">Download PNG</button>
+        </div>
       </div>
       <div id="graph-wrap">
         <div id="month-labels"></div>
@@ -382,6 +401,13 @@
   var selectedYear = 'last-year';
   var visibleCount = 10;
   var PAGE_SIZE = 10;
+
+  var PALETTE_COLORS = {
+    bg: '#0d1117',
+    text: '#c9d1d9',
+    muted: '#8b949e',
+    levels: ['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353']
+  };
 
   function toDate(s) {
     var parts = s.split('-');
@@ -701,6 +727,122 @@
     document.getElementById('tooltip').style.display = 'none';
   }
 
+  function drawRoundedRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Renders the currently-selected view onto an offscreen canvas, then
+  // sends the raw image bytes to Fusion (via fusionSendData) so Python can
+  // write it to disk using Fusion's own native Save dialog. A plain
+  // <a download> click doesn't work here -- Fusion's embedded palette
+  // browser has no real download manager to catch it.
+  function exportGraphAsPNG() {
+    var range = getViewRange();
+    var counts = countsInRange(range.dataStart, range.dataEnd);
+    var quartiles = computeQuartiles(counts);
+
+    var start = range.gridStart;
+    var dataStart = range.dataStart;
+    var dataEnd = range.dataEnd;
+
+    var totalDays = Math.round((dataEnd - start) / 86400000) + 1;
+    var totalWeeks = Math.ceil((totalDays + start.getDay()) / 7);
+
+    var cellSize = 11;
+    var cellGap = 3;
+    var cellStep = cellSize + cellGap;
+    var leftMargin = 30;
+    var topMargin = 44;
+    var bottomMargin = 30;
+    var rightPadding = 14;
+
+    var width = leftMargin + totalWeeks * cellStep + rightPadding;
+    var height = topMargin + 7 * cellStep + bottomMargin;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = PALETTE_COLORS.bg;
+    ctx.fillRect(0, 0, width, height);
+
+    var titleText = 'CADtributions -- ' +
+      (selectedYear === 'last-year' ? 'Last year' : selectedYear);
+    ctx.fillStyle = PALETTE_COLORS.text;
+    ctx.font = 'bold 14px -apple-system, "Segoe UI", Arial, sans-serif';
+    ctx.fillText(titleText, leftMargin, 18);
+
+    ctx.font = '10px -apple-system, "Segoe UI", Arial, sans-serif';
+    ctx.fillStyle = PALETTE_COLORS.muted;
+    var dayLabelRows = { 1: 'Mon', 3: 'Wed', 5: 'Fri' };
+    Object.keys(dayLabelRows).forEach(function(rowIdx) {
+      var y = topMargin + parseInt(rowIdx, 10) * cellStep + cellSize;
+      ctx.fillText(dayLabelRows[rowIdx], 0, y);
+    });
+
+    var lastMonth = -1;
+    for (var w = 0; w < totalWeeks; w++) {
+      for (var d = 0; d < 7; d++) {
+        var cellDate = new Date(start);
+        cellDate.setDate(start.getDate() + w * 7 + d);
+
+        if (cellDate < dataStart || cellDate > dataEnd) continue;
+
+        var x = leftMargin + w * cellStep;
+        var y = topMargin + d * cellStep;
+
+        var key = fmtDateKey(cellDate);
+        var count = counts[key] || 0;
+        var level = levelFor(count, quartiles);
+
+        ctx.fillStyle = PALETTE_COLORS.levels[level];
+        drawRoundedRect(ctx, x, y, cellSize, cellSize, 2);
+        ctx.fill();
+
+        if (d === 0 && cellDate.getMonth() !== lastMonth) {
+          lastMonth = cellDate.getMonth();
+          ctx.fillStyle = PALETTE_COLORS.muted;
+          ctx.font = '11px -apple-system, "Segoe UI", Arial, sans-serif';
+          ctx.fillText(
+            cellDate.toLocaleDateString(undefined, { month: 'short' }),
+            x, topMargin - 8
+          );
+        }
+      }
+    }
+
+    var legendY = height - 16;
+    var legendX = leftMargin;
+    ctx.font = '10px -apple-system, "Segoe UI", Arial, sans-serif';
+    ctx.fillStyle = PALETTE_COLORS.muted;
+    ctx.fillText('Less', legendX, legendY + 8);
+    legendX += 28;
+    PALETTE_COLORS.levels.forEach(function(hex) {
+      ctx.fillStyle = hex;
+      drawRoundedRect(ctx, legendX, legendY, 10, 10, 2);
+      ctx.fill();
+      legendX += 14;
+    });
+    ctx.fillStyle = PALETTE_COLORS.muted;
+    ctx.fillText('More', legendX + 4, legendY + 8);
+
+    var fileLabel = (selectedYear === 'last-year') ? 'last-year' : selectedYear;
+    var dataUrl = canvas.toDataURL('image/png');
+    var base64Data = dataUrl.split(',')[1];
+
+    adsk.fusionSendData('exportPng', JSON.stringify({
+      data: base64Data,
+      filename: 'cadtributions-' + fileLabel + '.png'
+    }));
+  }
+
   function renderEntries() {
     var container = document.getElementById('entries');
     var emptyState = document.getElementById('empty-state');
@@ -811,6 +953,8 @@
     renderGraph();
     renderEntries();
   });
+
+  document.getElementById('export-graph-btn').addEventListener('click', exportGraphAsPNG);
 
   // Receives pushes from Fusion (e.g. a live update right after a save).
   window.fusionJavaScriptHandler = {
