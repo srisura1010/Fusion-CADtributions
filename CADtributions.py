@@ -17,6 +17,7 @@ import json
 import datetime
 import pathlib
 import threading
+import base64
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -428,6 +429,31 @@ class CADtributionsHTMLHandler(adsk.core.HTMLEventHandler):
                                 "be finishing setup for a brand-new file. Try again "
                                 "in a few seconds."
                             )
+                        html_args.returnData = json.dumps({'status': 'error'})
+
+            elif action == 'exportPng':
+                incoming = json.loads(html_args.data) if html_args.data else {}
+                base64_data = incoming.get('data')
+                suggested_name = incoming.get('filename', 'cadtributions.png')
+                if not base64_data:
+                    html_args.returnData = json.dumps({'status': 'no_data'})
+                else:
+                    try:
+                        file_dialog = _ui.createFileDialog()
+                        file_dialog.isMultiSelectEnabled = False
+                        file_dialog.title = 'Save CADtribution Graph'
+                        file_dialog.filter = 'PNG files (*.png)'
+                        dialog_result = file_dialog.showSave()
+                        if dialog_result == adsk.core.DialogResults.DialogOK:
+                            image_bytes = base64.b64decode(base64_data)
+                            with open(file_dialog.filename, 'wb') as f:
+                                f.write(image_bytes)
+                            html_args.returnData = json.dumps({'status': 'OK'})
+                        else:
+                            html_args.returnData = json.dumps({'status': 'cancelled'})
+                    except Exception:
+                        if _ui:
+                            _ui.messageBox("Couldn't save the graph image.")
                         html_args.returnData = json.dumps({'status': 'error'})
 
             else:
