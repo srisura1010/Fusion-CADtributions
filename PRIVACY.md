@@ -36,4 +36,4 @@ If this policy changes in the future, the updated version will be posted here wi
 
 ## Contact
 
-Questions about this policy can be directed to the developer, Srivatsav Sura, through the [GitHub repository](https://github.com/srisura1010/Fusion-Cadtributions).
+Questions about this policy can be directed to the developer, Srivatsav Sura, through the [GitHub repository](https://github.com/srisura1010/Fusion-CADtributions).
