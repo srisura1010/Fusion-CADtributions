@@ -18,6 +18,7 @@ import datetime
 import pathlib
 import threading
 import base64
+import webbrowser
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -455,6 +456,18 @@ class CADtributionsHTMLHandler(adsk.core.HTMLEventHandler):
                         if _ui:
                             _ui.messageBox("Couldn't save the graph image.")
                         html_args.returnData = json.dumps({'status': 'error'})
+
+            elif action == 'openUrl':
+                incoming = json.loads(html_args.data) if html_args.data else {}
+                url = incoming.get('url')
+                if url:
+                    try:
+                        webbrowser.open(url)
+                        html_args.returnData = json.dumps({'status': 'OK'})
+                    except Exception:
+                        html_args.returnData = json.dumps({'status': 'error'})
+                else:
+                    html_args.returnData = json.dumps({'status': 'no_url'})
 
             else:
                 html_args.returnData = json.dumps({'status': 'ignored'})
