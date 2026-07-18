@@ -4,6 +4,8 @@ A Fusion 360 add-in that turns your save history into a GitHub style contributio
 
 Think of it like a commit graph, but for CAD work.
 
+Currently getting published in the Fusion App Store for download. Feel free to raise an issue on this repository for feature requests/bug reporting/questions.
+
 ## Features
 
 - Tracks every save automatically, no manual logging
