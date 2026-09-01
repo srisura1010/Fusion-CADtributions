@@ -39,7 +39,7 @@ Currently getting published in the Fusion App Store for download. Feel free to r
 
 ## How it works
 
-The add-in listens for Fusion's save event. When a file is saved to a Fusion Data Panel project, it reads the real version number Fusion assigns, so every save is counted exactly once and new files are correctly identified as new. That data gets written to a small JSON file alongside the add-in, and a panel built with plain HTML, CSS, and JavaScript renders it as a graph.
+The add-in listens for Fusion's save event. When a file is saved to a Fusion Data Panel project, it reads the real version number Fusion assigns, so every save is counted exactly once and new files are correctly identified as new. That data gets written to a small JSON file alongside the add-in, and a panel built with plain HTML, CSS, and JavaScript renders it as a colored graph.
 
 No external libraries, no network calls, everything runs locally.
 
