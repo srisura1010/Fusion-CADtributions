@@ -1,6 +1,6 @@
 # Fusion-CADtributions
 
-A Fusion 360 add-in that turns your save history into a GitHub style contribution graph. Every time you save a new version of a design, or create a brand new file, it counts as one CADtribution (like a contribution).
+An Autodesk Fusion add-in that turns your save history into a GitHub style contribution graph. Every time you save a new version of a design, or create a brand new file, it counts as one CADtribution (like a contribution).
 
 Think of it like a commit graph, but for CAD work.
 
@@ -31,7 +31,7 @@ Currently getting published in the Fusion App Store for download. Feel free to r
 ## Installation
 
 1. Download or clone this repo.
-2. Open Fusion 360 and go to **Utilities > Add-Ins > Scripts and Add-Ins** (or press `Shift+S`).
+2. Open Autodesk Fusion and go to **Utilities > Add-Ins > Scripts and Add-Ins** (or press `Shift+S`).
 3. On the **Add-Ins** tab, click the option to add a script or add-in from your device, then select the `CADtributions` folder.
 4. Select it in the list and toggle it on. Check **Run on Startup** if you want it to load automatically every time.
 5. Save any design. That's your first CADtribution.
