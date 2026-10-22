@@ -1,7 +1,7 @@
 """
 CADtributions
 -------------
-A Fusion 360 add-in that tracks every time you save a new version of a
+An Autodesk Fusion add-in that tracks every time you save a new version of a
 design (or create a brand new file) and shows them in a GitHub-style
 "contribution graph" -- a CADtribution graph.
 
@@ -491,7 +491,7 @@ def _initialize():
         cmd_def = _ui.commandDefinitions.addButtonDefinition(
             CMD_ID_SHOW_GRAPH,
             'CADtributions',
-            'View your CADtributions graph with a GitHub-style view of your Fusion 360 save history: what you saved, where, and when.',
+            'View your CADtributions graph with a GitHub-style view of your Autodesk Fusion save history: what you saved, where, and when.',
             './resources/graph_cmd',
         )
 
