@@ -2,7 +2,7 @@
 
 **Last updated: July 2026**
 
-CADtributions is a Fusion 360 add-in that tracks your save history and displays it as a contribution graph. This document explains what data the add-in handles.
+CADtributions is an Autodesk Fusion add-in that tracks your save history and displays it as a contribution graph. This document explains what data the add-in handles.
 
 ## What data is collected
 
@@ -12,7 +12,7 @@ None. CADtributions does not collect, transmit, or share any data with the devel
 
 The add-in stores information locally on your own computer, in a plain JSON file next to the add-in's installation folder. This includes:
 
-- File names, project names, and folder paths for designs you save in Fusion 360
+- File names, project names, and folder paths for designs you save in Autodesk Fusion.
 - Version numbers and timestamps of your saves
 - Descriptions you enter in Fusion's save dialog
 
