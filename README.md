@@ -33,9 +33,9 @@ Currently getting published in the Fusion App Store for download. Feel free to r
 1. Download or clone this repo.
 2. Open Autodesk Fusion and go to **Utilities > Add-Ins > Scripts and Add-Ins** (or press `Shift+S`).
 3. On the **Add-Ins** tab, click the option to add a script or add-in from your device, then select the `CADtributions` folder.
-4. Select it in the list and toggle it on. Check **Run on Startup** if you want it to load automatically every time.
+4. Select it in the list and click **Run**. The add-in is set to run on startup, so from then on it loads automatically each time you open Autodesk Fusion (you can confirm this with the **Run on Startup** option in the same dialog).
 5. Save any design. That's your first CADtribution.
-6. Click the CADtributions button in the ADD-INS panel (SOLID tab) to open the graph.
+6. Click the CADtributions button in the ADD-INS panel (Utilities tab) to open the graph.
 
 ## How it works
 
