@@ -55,4 +55,4 @@ MIT. See [LICENSE](LICENSE) for details.
 
 ## Author
 
-Srivatsav Sura, Midvale Utah
+Srivatsav Sura, STL Sri Tech Lab @ Autodesk App Store
