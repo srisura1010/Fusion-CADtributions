@@ -1,6 +1,6 @@
-   cadtributions_data.json
-   cadtributions_settings.json
-   *.bak
-   *.tmp
-   __pycache__/
-   .vscode/
+cadtributions_data.json
+cadtributions_settings.json
+*.bak
+*.tmp
+__pycache__/
+.vscode/
