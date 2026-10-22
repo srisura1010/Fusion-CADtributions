@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated: July 2026**
+**Last updated: October 2026**
 
 CADtributions is an Autodesk Fusion add-in that tracks your save history and displays it as a contribution graph. This document explains what data the add-in handles.
 
