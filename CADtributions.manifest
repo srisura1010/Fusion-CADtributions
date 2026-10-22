@@ -1,6 +1,7 @@
 {
     "autodeskProduct": "Fusion",
     "type": "addin",
+    "runOnStartup": true,
     "author": "Srivatsav Sura",
     "description": {
         "": "Tracks a CADtribution every time you save a new version of a design (or create a new file) and displays them in a GitHub-style contribution graph with additional features."
